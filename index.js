@@ -133,8 +133,8 @@ app.ws('/:account(r[a-zA-Z0-9]{20,})', (ws, req) => {
       xrplMessages: 0
     })
 
-    ws.on('message', msg => {
-      ws.send(xrplAccount, 'hi', msg)
+    ws.on('message', () => {
+      ws.send(xrplAccount)
     })
 
   } catch (e) {
