@@ -1,0 +1,34 @@
+{
+  "name": "xrpl-hooks-debug-stream",
+  "version": "1.0.0",
+  "description": "Strean rippled (xrpld) output to subscribed WebSocket clients on a per account basis",
+  "main": "index.js",
+  "scripts": {
+    "serve": "DEBUG=stream* node .",
+    "dev": "DEBUG=stream* nodemon .",
+    "pm2": "DEBUG=stream* pm2 reload pm2.config.js",
+    "logs": "pm2 logs"
+  },
+  "author": "Wietse Wind <w@xrpl-labs.com>",
+  "license": "MIT",
+  "dependencies": {
+    "cors": "^2.8.5",
+    "express": "^4.17.1",
+    "express-ws": "^5.0.2",
+    "helmet": "^4.6.0",
+    "morgan-debug": "^2.0.0",
+    "ripple-address-codec": "^4.1.3",
+    "websocket": "^1.0.34"
+  },
+  "devDependencies": {
+    "nodemon": "^2.0.12",
+    "pm2": "^5.1.1"
+  },
+  "nodemonConfig": {
+    "ignore": [
+      "test/*",
+      "node_modules/*"
+    ],
+    "ext": "ts,js,json,html,.env"
+  }
+}
