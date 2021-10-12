@@ -110,6 +110,7 @@ log.log = console.log.bind(console)
 
 app.use(bodyParser.json())
 app.use(helmet())
+app.use(express.static(__dirname + '/public'))
 app.use(morganDebug('stream:httplog', 'combined'))
 
 app.use(cors({
@@ -152,7 +153,7 @@ app.ws('/:account(r[a-zA-Z0-9]{20,})', (ws, req) => {
 
 app.get('/', async (req, res) => {
   res.status(404).json({
-    msg: 'Connect using a WebSocket client',
+    msg: 'Connect using a WebSocket client & provide an XRPL account address as path',
     error: true
   })
 })
@@ -178,6 +179,17 @@ app.get('/status', async (req, res) => {
     }, {})
   })
 })
+
+app.get('/:account(r[a-zA-Z0-9]{20,})', 
+  (req, res, next) => {
+    req.url = '/'
+    if (!addressCodec.isValidClassicAddress(req.params?.account || '')) {
+      next('route')
+    } else {
+      next()
+    }
+  },
+  express.static(__dirname + '/public', { index: 'client.html' }))
 
 app.get('*', async (req, res) => {
   res.status(404).json({
