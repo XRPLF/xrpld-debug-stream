@@ -45,7 +45,7 @@ Environment variables:
 ```
   websocketd --port=1400 \
     sh -c "docker exec xrpld-hooks tail -f /opt/xrpld-hooks/log"
-``
+```
 
 3. Run this repository:
 ```
