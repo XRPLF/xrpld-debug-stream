@@ -74,6 +74,11 @@ const startStreamClient = () => {
   
   client.onmessage = e => {
     if (typeof e.data === 'string') {
+      if (e.data.match(/INSERT INTO AccountTransactions/)) {
+        // Ignore
+        return
+      }
+
       clearTimeout(flushTimeout)
 
       if (e.data.match(/^[0-9]{4}-[A-Za-z]{3}-[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2}/)) {
