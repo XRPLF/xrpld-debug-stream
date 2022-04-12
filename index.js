@@ -1,4 +1,7 @@
 const log = require('debug')('stream')
+const log_redis = log.extend('redis')
+
+const ioredis = require('ioredis')
 const express = require('express')
 const bodyParser = require('body-parser')
 const cors = require('cors')
@@ -10,14 +13,48 @@ const W3CWebSocket = require('websocket').w3cwebsocket
 let upstreamMessageCount = 0
 let upstreamConnectCount = 0
 
+const redis = new ioredis({
+  host: process.env.REDIS_HOST || '127.0.0.1',
+  port: Number(process.env.REDIS_PORT || 6379),
+  password: process.env.REDIS_PASSWORD || undefined,
+  tls: [1, '1', true, 'true', 'yes', 'YES', 'y', 'Y'].indexOf(process.env.REDIS_TLS) > -1,
+  autoResendUnfulfilledCommands: true,
+  maxRetriesPerRequest: null
+})
+
+redis.on('connect', _ => log_redis('REDIS connected'))
+redis.on('ready', _ => log_redis('REDIS ready'))
+redis.on('close', _ => log_redis('REDIS disconnected'))
+redis.on('error', e => log_redis('Error', e))
+
+const tempStoreMsg = (account, message) => {
+  try {
+    const key = account + '_' + new Date() / 1 + '_' + upstreamMessageCount
+    const exp = 60 * 30 // 60 seconds times 30 minutes
+
+    // log_redis('set', key)
+    redis.set('msg:' + key, message, 'ex', exp)
+    redis.incr('acc:' + account)
+    redis.expire('acc:' + account, exp)
+  } catch (e) {
+    log_redis('Error', e)
+  }
+}
+
 const streamClientMessage = msg => {
   if (msg !== '') {
+    if (msg.match(/reportConsensusStateChange/)) return
+
     upstreamMessageCount++
     const rAddrMatch = msg.match(/r[a-zA-Z0-9]{20,}/g)
+
     if (rAddrMatch) {
       const uniqueAccounts = [...new Set(rAddrMatch)]
+
       log('MSG for', uniqueAccounts.join(', '))
       uniqueAccounts.forEach(r => {
+        tempStoreMsg(r, msg)
+
         expressWs.getWss().clients.forEach(c => {
           if (c?.xrplAccount === r) {
             c.send(msg)
@@ -160,6 +197,35 @@ app.get('/', async (req, res) => {
   res.status(404).json({
     msg: 'Connect using a WebSocket client & provide an XRPL account address as path',
     error: true
+  })
+})
+
+app.get('/recent/accounts', async (req, res) => {
+  return res.json({
+    accounts: (await redis.keys('acc:*')).map(k => k.slice(4))
+  })
+})
+
+app.get('/recent/:account(r[a-zA-Z0-9]{18,})', async (req, res) => {
+  const logs = (await Promise.all((await redis.keys('msg:' + req.params.account + '_*'))
+    .map(async l => {
+      const m = l.slice(4).split('_')
+      return {
+        timestamp: m[1],
+        data: await redis.get(l)
+      }
+    }))).reduce((a, b) => {
+      a[b.timestamp] = b.data
+      return a
+    }, {})
+
+  return res.json({
+    account: req.params.account,
+    messages: Number(await redis.get('acc:' + req.params.account) || 0),
+    logs: Object.keys(logs).sort().reduce((a, b) => {
+      a[b] = logs[b]
+      return a
+    }, {})
   })
 })
 
