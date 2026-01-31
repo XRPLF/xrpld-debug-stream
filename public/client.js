@@ -1,4 +1,5 @@
-var account = document.location.pathname.replace(/^[^a-zA-Z0-9]+/g, '').split('/')[0]
+// var account = document.location.pathname.replace(/^[^a-zA-Z0-9]+/g, '').split('/')[0]
+var account = document.location.pathname.replace(/^[^a-zA-Z0-9]+/g, '').split('/')[0].replace(/^debugstream/, '')
 var endpoint = 'ws' + document.location.origin.slice(4) + '/' + account
 var reconnect = 1
 var reconnectTimer
