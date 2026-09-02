@@ -13,6 +13,7 @@
   "license": "MIT",
   "dependencies": {
     "cors": "^2.8.5",
+    "dotenv": "^17.2.3",
     "express": "^4.17.1",
     "express-ws": "^5.0.2",
     "helmet": "^4.6.0",

@@ -1,6 +1,6 @@
 # `XRPLD` Debug Stream (WebSocket)
 
-## Built for the Hooks Testnet Debug Stream
+## Built for the Devnet Debug Stream
 
 This service relies on the output of an existing WebSocket, e.g. 
 `websocketd` running on the stdout of `xrpld`.
@@ -33,7 +33,7 @@ Environment variables:
 
 ## Sampe `websocketd` service
 
-1. Run Hooks Testnet (or other XRPL node)
+1. Run Devnet (or other XRPL node)
 ```
   docker run -d --name xrpld-hooks \
     --network=host --restart=always \
@@ -44,7 +44,10 @@ Environment variables:
 
 ```
   websocketd --port=1400 \
-    sh -c "docker exec xrpld-hooks tail -f /opt/xrpld-hooks/log"
+    sh -c "docker exec vnode1 tail -f /opt/ripple/log/debug.log"
+
+nohup websocketd --port=1400 \
+  sh -c "docker exec vnode1 tail -f /opt/ripple/log/debug.log" &
 ```
 
 3. Run this repository:
