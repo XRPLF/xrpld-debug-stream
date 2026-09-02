@@ -60,7 +60,20 @@ const parseBatchTrace = msg => {
   return out
 }
 
-const storeBatchResult = async ({ parent, inner, applied, result }, ts) => {
+// Writes for one parent are serialized: the inner-transaction lines of a batch arrive as
+// separate messages within the same millisecond, and a concurrent read-modify-write would
+// drop all but the last.
+const storeChains = new Map()
+const storeBatchResult = (r, ts) => {
+  const prev = storeChains.get(r.parent) || Promise.resolve()
+  const next = prev.then(() => writeBatchResult(r, ts)).finally(() => {
+    if (storeChains.get(r.parent) === next) storeChains.delete(r.parent)
+  })
+  storeChains.set(r.parent, next)
+  return next
+}
+
+const writeBatchResult = async ({ parent, inner, applied, result }, ts) => {
   try {
     const key = 'batchresult:' + parent
     const field = 'inner:' + inner
