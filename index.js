@@ -291,9 +291,11 @@ app.use(helmet())
 app.use(express.static(__dirname + '/public'))
 app.use(morganDebug('stream:httplog', 'combined'))
 
+// CORS_ORIGINS unset or '*' allows any origin; otherwise a space/comma separated allow-list.
+// ('*' inside a list would be matched as a literal origin and allow nothing.)
+const corsOrigins = (process.env?.CORS_ORIGINS || '*').trim()
 app.use(cors({
-  origin: (process.env?.CORS_ORIGINS || '*').replace(/ +/g, ',').split(','),
-  // methods: 'GET, POST, OPTIONS'
+  origin: corsOrigins === '*' ? '*' : corsOrigins.replace(/ +/g, ',').split(',')
 }))
 
 // WebSocket endpoint for all batch transactions
