@@ -56,3 +56,50 @@ nohup websocketd --port=1400 \
   # Now Monitor:
   pm2 monit XRPLD_DEBUG_STREAM
 ```
+
+
+## Batch and contract traces
+
+Besides account addresses the stream matches `BatchTrace[<parentBatchId>]` and
+`WasmTrace[<txId>]` lines. WebSocket subscriptions:
+
+```
+  ws://{host}/batch                      every BatchTrace line
+  ws://{host}/batch/{parentBatchId}      one batch
+  ws://{host}/contract                   every WasmTrace line
+  ws://{host}/contract/{txId}            one contract transaction
+```
+
+## Batch results after the fact
+
+Each BatchTrace line (`<innerTxId> applied|failure: <TER>`) is also parsed and kept per parent
+batch, so the outcome can be fetched after submission without having subscribed first:
+
+```
+  GET /batch/{parentBatchId}         JSON for programs (curl, fetch), the live page for browsers
+  GET /batch/{parentBatchId}.json    always JSON
+  GET /batches?limit=50              most recent batches, newest first
+  GET /health                        { ok, upstream }
+```
+
+```
+  curl https://debug.devnet.xrpl.org/batch/D5A1649061F21BCD145E8EFEBC3FD085876EE20695F46FACA86596CAB25EE271
+  {
+    "parent_batch_id": "D5A16490…",
+    "first_seen": 1788369126146,
+    "last_seen": 1788369126148,
+    "inner_results": [
+      { "hash": "F137AEA3…", "applied": true,  "result": "tesSUCCESS", "observations": [ ... ] },
+      { "hash": "A056A319…", "applied": false, "result": "terPRE_SEQ", "observations": [ ... ] }
+    ]
+  }
+```
+
+`inner_results` is in the order the node applied the inner transactions, which is the order of
+`RawTransactions`. Inner transactions the node never attempted (after a `tfUntilFailure` stop,
+for example) are absent. The results are what this node logged while applying the batch: an
+open-ledger trial apply and the consensus apply can differ, so every observation is kept and the
+latest one is reported as `applied` / `result`.
+
+Results do not expire unless `BATCH_RESULT_TTL` (seconds) is set. Raw messages served by
+`/recent/...` still expire after 30 minutes.

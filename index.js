@@ -42,6 +42,74 @@ const tempStoreMsg = (type, hash, message) => {
   }
 }
 
+// Inner-transaction outcomes parsed out of BatchTrace lines, kept per parent batch so the
+// result can be fetched after the fact. Unlike the raw messages these do not expire unless
+// BATCH_RESULT_TTL (seconds) is set. Fields on `batchresult:<parent>`:
+//   meta            JSON { first_seen, last_seen }
+//   order           JSON [innerTxId, ...] in first-seen order (= RawTransactions order)
+//   inner:<txid>    JSON { hash, applied, result, first_seen, last_seen, observations: [...] }
+const BATCH_RESULT_TTL = Number(process.env.BATCH_RESULT_TTL || 0)
+const BATCH_TRACE_RE = /BatchTrace\[([A-F0-9]{64})\]: ([A-F0-9]{64}) (applied|failure): (\w+)/g
+const MAX_OBSERVATIONS = 10
+
+const parseBatchTrace = msg => {
+  const out = []
+  for (const m of msg.matchAll(BATCH_TRACE_RE)) {
+    out.push({ parent: m[1], inner: m[2], applied: m[3] === 'applied', result: m[4] })
+  }
+  return out
+}
+
+const storeBatchResult = async ({ parent, inner, applied, result }, ts) => {
+  try {
+    const key = 'batchresult:' + parent
+    const field = 'inner:' + inner
+    const [metaRaw, orderRaw, innerRaw] = await redis.hmget(key, 'meta', 'order', field)
+
+    const meta = metaRaw ? JSON.parse(metaRaw) : { first_seen: ts }
+    meta.last_seen = ts
+
+    const order = orderRaw ? JSON.parse(orderRaw) : []
+    if (!order.includes(inner)) order.push(inner)
+
+    const entry = innerRaw
+      ? JSON.parse(innerRaw)
+      : { hash: inner, first_seen: ts, observations: [] }
+    entry.applied = applied
+    entry.result = result
+    entry.last_seen = ts
+    entry.observations.push({ ts, applied, result })
+    if (entry.observations.length > MAX_OBSERVATIONS) {
+      entry.observations = entry.observations.slice(-MAX_OBSERVATIONS)
+    }
+
+    const tx = redis.multi()
+      .hset(key, 'meta', JSON.stringify(meta), 'order', JSON.stringify(order), field, JSON.stringify(entry))
+      .zadd('batchresults', 'NX', ts, parent)
+    if (BATCH_RESULT_TTL > 0) tx.expire(key, BATCH_RESULT_TTL)
+    await tx.exec()
+  } catch (e) {
+    log_redis('Error storing batch result', e)
+  }
+}
+
+const getBatchResult = async parent => {
+  const all = await redis.hgetall('batchresult:' + parent)
+  if (!all || !all.meta) return null
+  const meta = JSON.parse(all.meta)
+  const order = JSON.parse(all.order || '[]')
+  return {
+    parent_batch_id: parent,
+    first_seen: meta.first_seen,
+    last_seen: meta.last_seen,
+    inner_results: order
+      .map(h => all['inner:' + h])
+      .filter(Boolean)
+      .map(v => JSON.parse(v)),
+    note: 'Outcomes are what this node logged while applying the batch; the latest observation per inner transaction is reported as `applied`/`result`.'
+  }
+}
+
 const streamClientMessage = msg => {
   if (msg !== '') {
     if (msg.match(/reportConsensusStateChange/)) return
@@ -84,6 +152,8 @@ const streamClientMessage = msg => {
       }).filter(Boolean))]
 
       log('MSG for batches', uniqueBatches.join(', '))
+      const now = Date.now()
+      parseBatchTrace(msg).forEach(r => storeBatchResult(r, now))
       uniqueBatches.forEach(batchHash => {
         tempStoreMsg('batch', batchHash, msg)
 
@@ -107,10 +177,6 @@ const streamClientMessage = msg => {
         tempStoreMsg('contract', contractHash, msg)
 
         expressWs.getWss().clients.forEach(c => {
-          console.log(c?.subscriptionType);
-          console.log(c?.hash);
-          console.log(contractHash);
-          
           if (c?.subscriptionType === 'contract' && (!c?.hash || c?.hash === contractHash)) {
             c.send(msg)
             c.messages++
@@ -387,6 +453,33 @@ app.get('/', async (req, res) => {
   })
 })
 
+app.get('/health', (req, res) => {
+  res.json({ ok: true, upstream: upstreamConnected })
+})
+
+// Parsed inner-transaction outcomes, newest batches first.
+app.get('/batches', async (req, res) => {
+  const limit = Math.min(Number(req.query.limit || 50), 500)
+  const parents = await redis.zrevrange('batchresults', 0, limit - 1)
+  const results = await Promise.all(parents.map(getBatchResult))
+  res.json({ count: results.length, batches: results.filter(Boolean) })
+})
+
+const sendBatchResult = async (req, res) => {
+  const parent = req.params.hash.toUpperCase()
+  const result = await getBatchResult(parent)
+  if (!result) {
+    return res.status(404).json({
+      error: true,
+      parent_batch_id: parent,
+      msg: 'No BatchTrace seen for this parent batch id. The node logs it when it applies the batch; either the batch has not reached this node yet or it was applied before this store existed.'
+    })
+  }
+  res.json(result)
+}
+
+app.get('/batch/:hash([A-F0-9]{64}).json', sendBatchResult)
+
 app.get('/recent/batches', async (req, res) => {
   return res.json({
     batches: (await redis.keys('batch:*')).map(k => k.slice(6))
@@ -508,8 +601,13 @@ app.get('/batch',
   },
   express.static(__dirname + '/public', { index: 'client.html' }))
 
-app.get('/batch/:hash([A-F0-9]{64})', 
+// Same URL for humans and programs: a browser (Accept: text/html) gets the live page, a
+// program (curl, fetch, SDKs — Accept: */* or application/json) gets the stored results.
+app.get('/batch/:hash([A-F0-9]{64})',
   (req, res, next) => {
+    if (req.query.format === 'json' || req.accepts(['json', 'html']) === 'json') {
+      return sendBatchResult(req, res)
+    }
     req.url = '/'
     next()
   },
