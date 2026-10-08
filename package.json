@@ -31,5 +31,10 @@
       "node_modules/*"
     ],
     "ext": "ts,js,json,html,.env"
+  },
+  "overrides": {
+    "degenerator": {
+      "vm2": "3.12.2"
+    }
   }
 }
